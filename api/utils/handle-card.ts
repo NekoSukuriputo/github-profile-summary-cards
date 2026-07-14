@@ -25,6 +25,27 @@ function isRotatableError(err: any): boolean {
     return status === 401 || status === 403 || status === 429 || err?.isRateLimit === true;
 }
 
+// Map an internal error to a generic, user-facing message. The raw error (e.g.
+// "API rate limit already exceeded for user ID 20241522") can leak the backing
+// account/implementation, so it's logged server-side but never shown on the card
+// — the card only ever shows one of these safe, actionable messages.
+function safeErrorMessage(err: any): string {
+    const raw = String(err?.message ?? '').toLowerCase();
+    const status = err?.response?.status;
+    // Rate limited: only on explicit evidence (429, our GraphQL isRateLimit flag, or
+    // message text). Note 403 alone is NOT rate limiting — it's usually auth/permission.
+    if (err?.isRateLimit === true || status === 429 || raw.includes('rate limit')) {
+        return 'Cards are temporarily rate limited. Please try again in a few minutes.';
+    }
+    // Not found: explicit 404, or GitHub's "could not resolve to a User/Organization".
+    if (status === 404 || raw.includes('could not resolve') || raw.includes('not found') || raw.includes('not exist')) {
+        return 'Could not find that user or organization — please check the username.';
+    }
+    // Everything else (auth/permission incl. 401/403, token/config problems): stay
+    // generic so we don't hint at the backing setup.
+    return 'This card is temporarily unavailable. Please try again later.';
+}
+
 // Shared request handler for every card endpoint: validates username/theme,
 // resolves the theme + color overrides, runs the renderer while rotating GitHub
 // tokens on rate-limit/auth errors, sets headers, fires analytics, and renders a
@@ -74,8 +95,15 @@ export async function handleCard(
             }
         }
     } catch (err: any) {
-        console.log(err);
+        // Log the real error for debugging; show only a generic message to clients.
+        // Log only a redacted summary — never the raw error object, which for axios
+        // failures carries the request config/headers (incl. the Authorization token)
+        // and response body.
+        console.log(`card error [${eventName}] status=${err?.response?.status ?? 'n/a'}: ${err?.message ?? 'unknown'}`);
         res.setHeader('Content-Type', 'image/svg+xml');
-        res.send(getErrorMsgCard(err.message, theme));
+        // Short cache so a transient outage doesn't re-invoke the function on every
+        // request, but clears quickly (and lets image proxies refetch) once healthy.
+        res.setHeader('Cache-Control', 'public, max-age=60');
+        res.send(getErrorMsgCard(safeErrorMessage(err), theme));
     }
 }
