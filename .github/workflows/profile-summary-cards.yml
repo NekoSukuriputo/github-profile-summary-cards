@@ -1,0 +1,21 @@
+name: GitHub Profile Summary Cards
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # Berjalan otomatis setiap hari
+  workflow_dispatch: # Supaya bisa kamu klik tombol "Run" manual kapan saja
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: generate
+
+    steps:
+      - uses: actions/checkout@v3
+      
+      - uses: ./
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          USERNAME: NekoSukuriputo
+          THEME: tokyonight
