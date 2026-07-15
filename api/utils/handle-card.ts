@@ -1,5 +1,6 @@
 import {getGitHubToken} from './github-token-updater';
 import {getErrorMsgCard} from './error-card';
+import {waitUntil} from '@vercel/functions';
 import {sendAnalytics, resolveSource} from '../../src/utils/analytics';
 import {CONST_CACHE_CONTROL} from '../../src/const/cache';
 import {resolveThemeName, parseThemeColorOverride, ThemeColorOverride} from '../../src/const/theme';
@@ -81,10 +82,13 @@ export async function handleCard(
                 res.setHeader('Content-Type', 'image/svg+xml');
                 res.setHeader('Cache-Control', CONST_CACHE_CONTROL);
                 res.send(applyAnimation(cardSVG, animation, req.query.duration));
-                // Fire-and-forget: don't block the response on analytics. Tag the
-                // source (demo page vs README embed vs other) for GA segmentation.
+                // Don't block the response on analytics, but keep the invocation
+                // alive until the GA call settles — a bare `void` promise gets
+                // frozen with the lambda after res.send and aborts on the next
+                // thaw. Tag the source (demo page vs README embed vs other) for
+                // GA segmentation.
                 const source = resolveSource(req.query.source, String(req.headers['user-agent'] ?? ''));
-                void sendAnalytics(eventName, {username, theme, source, ...extraAnalytics}, req.headers);
+                waitUntil(sendAnalytics(eventName, {username, theme, source, ...extraAnalytics}, req.headers));
                 return;
             } catch (err: any) {
                 console.log(err.message);
